@@ -1,0 +1,104 @@
+name: Update latest blog post
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily at 6 AM UTC
+  workflow_dispatch:       # manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch latest post from RSS
+        id: rss
+        run: |
+          curl -sf "https://bhuvanesh09.github.io/posts/index.xml" > /tmp/feed.xml
+
+          # Use Python to parse and sort by pubDate, get the newest post
+          python3 - <<'EOF'
+          import xml.etree.ElementTree as ET
+          from email.utils import parsedate_to_datetime
+          import os
+
+          tree = ET.parse("/tmp/feed.xml")
+          items = tree.getroot().find("channel").findall("item")
+
+          latest = max(items, key=lambda i: parsedate_to_datetime(i.find("pubDate").text))
+
+          title = latest.find("title").text
+          link = latest.find("link").text
+          desc = (latest.find("description").text or "")[:1000]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"title={title}\n")
+              f.write(f"link={link}\n")
+
+          with open("/tmp/post_description.txt", "w") as f:
+              f.write(desc)
+
+          print(f"Latest post: {title}")
+          EOF
+
+      - name: Generate summary with Gemini
+        id: summary
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          DESC=$(cat /tmp/post_description.txt)
+          TITLE="${{ steps.rss.outputs.title }}"
+
+          PROMPT="You are summarizing a blog post for a GitHub profile README. Write exactly one sentence (under 30 words) that captures what this post is about. Be direct and concise. Do not use quotes around your response.\n\nTitle: ${TITLE}\n\nExcerpt: ${DESC}"
+
+          RESPONSE=$(curl -sf "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
+            -H 'Content-Type: application/json' \
+            -H "X-goog-api-key: $GEMINI_API_KEY" \
+            -X POST \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                contents: [{ parts: [{ text: $prompt }] }],
+                generationConfig: { temperature: 0.3, maxOutputTokens: 200, thinkingConfig: { thinkingBudget: 0 } }
+              }')")
+
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' | tr -d '\n')
+
+          echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+
+      - name: Update README
+        run: |
+          TITLE="${{ steps.rss.outputs.title }}"
+          LINK="${{ steps.rss.outputs.link }}"
+          SUMMARY="${{ steps.summary.outputs.summary }}"
+
+          # Replace content between markers
+          awk -v title="$TITLE" -v link="$LINK" -v summary="$SUMMARY" '
+            /<!-- LATEST_POST_START -->/ {
+              print
+              print ""
+              print "> [**" title "**](" link ") — " summary
+              skip = 1
+              next
+            }
+            /<!-- LATEST_POST_END -->/ {
+              print ""
+              print
+              skip = 0
+              next
+            }
+            !skip { print }
+          ' README.md > README.tmp && mv README.tmp README.md
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet README.md || {
+            git add README.md
+            git commit -m "Update latest blog post in README"
+            git push
+          }
