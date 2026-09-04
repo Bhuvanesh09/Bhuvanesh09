@@ -6,7 +6,7 @@ ML Engineer at [Sprinklr](https://www.sprinklr.com/), working on LLM optimizatio
 
 <!-- LATEST_POST_START -->
 
-> [**We are all word rotators**](https://bhuvanesh09.github.io/posts/we-are-all-word-rotators/) — This post argues that many non-technical people discussing LLMs are merely pattern-matching information without true understanding.
+> [**We are all word rotators**](https://bhuvanesh09.github.io/posts/we-are-all-word-rotators/) — This post critiques non-technical people's superficial understanding of LLMs, highlighting their pattern-matching explanations versus the true complexity.
 
 <!-- LATEST_POST_END -->
 
